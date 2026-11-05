@@ -12,6 +12,10 @@ def chf(x: float | None) -> str:
     return f"{'-' if x < 0 else ''}CHF {s}"
 
 
+def fdate(d: str | None) -> str:
+    return ".".join(reversed(d.split("-"))) if d else "–"
+
+
 def pct(x: float | None, sign: bool = True) -> str:
     if x is None:
         return "–"
@@ -29,7 +33,7 @@ def build_insights(state: dict[str, Any]) -> list[dict[str, str]]:
     if k:
         years = k["days"] / 365.25
         tone = "good" if (k["pnl"] or 0) >= 0 else "bad"
-        txt = (f"Seit dem ersten Kauf am {k['start']} ({years:.1f} Jahre) hast du "
+        txt = (f"Seit dem ersten Kauf am {fdate(k['start'])} ({years:.1f} Jahre) hast du "
                f"{chf(k['net_invested'])} eingezahlt (Umschichtungen zwischen ETFs nicht doppelt gezählt). Heute ist das Depot {chf(k['value'])} wert, "
                f"das ergibt {chf(k['pnl'])} Gewinn bzw. Verlust ({pct(k['pnl_pct_on_invested'])} auf das investierte Kapital).")
         if k.get("irr_pct") is not None:
@@ -71,7 +75,7 @@ def build_insights(state: dict[str, Any]) -> list[dict[str, str]]:
         if k.get("max_drawdown_pct") is not None and k["max_drawdown_pct"] < -1:
             add("Risiko",
                 f"Der grösste zwischenzeitliche Rückgang betrug {pct(k['max_drawdown_pct'])} "
-                f"(Tiefpunkt am {k['max_drawdown_date']})."
+                f"(Tiefpunkt am {fdate(k['max_drawdown_date'])})."
                 + (f" Die annualisierte Schwankung (Volatilität) liegt bei {pct(k['volatility_pct'], False)}."
                    if k.get("volatility_pct") else "")
                 + (f" Sharpe-Ratio: {k['sharpe']:.2f}." if k.get("sharpe") is not None and k["days"] >= 180 else ""),
@@ -86,13 +90,29 @@ def build_insights(state: dict[str, Any]) -> list[dict[str, str]]:
                 "Jeder Wechsel kostete Courtage, Stempelsteuer und Devisenspread, siehe Kosten.",
                 "neutral")
 
+    for sw in state.get("switches") or []:
+        add(f"Umschichtung am {fdate(sw['date'])}",
+            f"Verkauft für {chf(sw['sold'])}: {', '.join(sw['sells'])}. Gekauft für {chf(sw['bought'])}: "
+            f"{', '.join(sw['buys'])}. Kosten der Umschichtung (Courtage, Stempelsteuer, Devisen, beide Seiten): "
+            f"{chf(sw['costs'])}, also {pct(sw['cost_pct'], False)} des umgeschichteten Betrags.",
+            "warn" if (sw.get("cost_pct") or 0) > 0.5 else "neutral")
+
     costs = rep.get("costs") or {}
+    lc = state.get("ledger_costs")
+    if lc and lc.get("total"):
+        costs = {"total": lc["total"], "total_pct": lc.get("total_pct"), "fx_conversion": lc.get("fx_conversion"),
+                 "commission": lc.get("commission"), "stamp_duty_foreign": lc.get("stamp_duty"),
+                 "product_costs": lc.get("product_costs")}
+        n_sw = sum(1 for t in state.get("ledger_trades", []))
+        if n_sw:
+            costs["_trades"] = n_sw
     if costs.get("total"):
         parts = sorted([("Devisenumrechnung", costs.get("fx_conversion")), ("Courtage", costs.get("commission")),
                         ("Stempelsteuer", (costs.get("stamp_duty_foreign") or 0) + (costs.get("stamp_duty_domestic") or 0)),
                         ("Produktkosten (TER)", costs.get("product_costs"))], key=lambda kv: -(kv[1] or 0))
         top = parts[0]
-        txt = (f"Laut Saxo-Bericht hast du im Zeitraum {chf(costs['total'])} Kosten bezahlt, "
+        txt = (f"Laut Saxo hast du im Zeitraum {chf(costs['total'])} Kosten bezahlt"
+               + (f" (bei {costs['_trades']} Käufen/Verkäufen)" if costs.get("_trades") else "") + ", "
                f"{pct(costs.get('total_pct'), False)} des durchschnittlich investierten Kapitals. "
                f"Grösster Posten: {top[0]} ({chf(top[1])}).")
         if top[0] == "Devisenumrechnung":

@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS exposures (
     source  TEXT,
     PRIMARY KEY (isin, kind, name)
 );
+CREATE TABLE IF NOT EXISTS ledger (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    imported_at  TEXT NOT NULL,
+    data_json    TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS refresh_log (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     ts       TEXT NOT NULL,
@@ -83,6 +88,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         {"symbol": "ACWI", "label": "MSCI ACWI (iShares ACWI)"},
     ],
     "symbol_overrides": {},
+    "isin_overrides": {},
 }
 
 
@@ -207,6 +213,26 @@ class Database:
         data["_imported_at"] = row["imported_at"]
         return data
 
+    # ---------- Saxo «Aggregierte Beträge» ----------
+    def set_ledger(self, data: dict) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO ledger(id, imported_at, data_json) VALUES(1, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET imported_at=excluded.imported_at, data_json=excluded.data_json",
+                (datetime.now().isoformat(timespec="seconds"), json.dumps(data)))
+
+    def ledger(self) -> dict | None:
+        row = self.conn.execute("SELECT * FROM ledger WHERE id=1").fetchone()
+        if not row:
+            return None
+        data = json.loads(row["data_json"])
+        data["_imported_at"] = row["imported_at"]
+        return data
+
+    def delete_all_estimated_trades(self) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM trades WHERE estimated=1")
+
     # ---------- Kurse ----------
     def save_series(self, series: str, points: Iterable[tuple[str, float]], currency: str | None,
                     source: str, label: str | None = None) -> int:
@@ -262,7 +288,7 @@ class Database:
     def reset(self) -> None:
         with self.conn:
             for t in ["instruments", "trades", "reports", "prices", "series_meta", "exposures",
-                      "refresh_log"]:
+                      "refresh_log", "ledger"]:
                 self.conn.execute(f"DELETE FROM {t}")
 
 

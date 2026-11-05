@@ -9,6 +9,7 @@ per Klick auf **Aktualisieren** aus kostenlosen Quellen.
 - **Import**
   - Saxo **Portfolio-Bericht (PDF)**: Bestand, Ø-Kaufkurs, Kontowert pro Stichtag,
     Quartalsrenditen vs. Saxo-Benchmark, G/V je ETF (auch bereits verkaufte), Kostenübersicht
+  - Saxo **«Aggregierte Beträge» (Excel)**: tägliche Werte, alle Käufe/Verkäufe, Kosten, Einzahlungen
   - Saxo **Trade-Export (Excel/CSV)**: jeder Kauf und Verkauf mit Datum, Stückzahl, Kurs und Gebühren.
     Deutsche und englische Spaltennamen werden automatisch erkannt.
   - Manuelle Erfassung bzw. Korrektur von Transaktionen in der App
@@ -24,7 +25,7 @@ per Klick auf **Aktualisieren** aus kostenlosen Quellen.
   - Zerlegung des Gewinns: realisiert, Kursgewinn, Währungseffekt
   - Monatsrenditen, Drawdown, Volatilität, Sharpe-Ratio
   - Sektoren, Länder und Top-Positionen mit deinem CHF-Anteil
-  - Saxo-Kostenanalyse und Quartalsvergleich
+  - Saxo-Kostenanalyse (je Art und je ETF), Kosten jeder Umschichtung, Quartalsvergleich
   - Automatisch erzeugte Analyse in Textform
 
 ## Installation (Windows)
@@ -43,11 +44,16 @@ Alternative ohne `.exe`: Python 3.10+ installieren und `start_windows.bat` (bzw.
 
 | Was | Wo in SaxoTraderGO | Wofür |
 |---|---|---|
-| Portfolio-Bericht (PDF) | Konto → Berichte → Portfolio-Bericht, Zeitraum ab Kontoeröffnung | Kosten, Quartale, Bestand, frühere ETFs |
-| Trades (Excel) | Konto → Historie → Trades (bzw. Transaktionen), Zeitraum ab Kontoeröffnung → Export | exakte Kauf-/Verkaufsdaten |
+| **Aggregierte Beträge (Excel)**, empfohlen | Konto → Berichte → Aggregierte Beträge, Zeitraum ab Kontoeröffnung → Export | jeder Kauf/Verkauf, alle Kosten, Einzahlungen, tägliche Positionswerte und Rendite |
+| Portfolio-Bericht (PDF) | Konto → Berichte → Portfolio-Bericht | ISIN und Stückzahl des Bestands, Quartalsvergleich mit Saxo-Benchmark |
+| Trades (Excel/CSV), Alternative | Konto → Historie → Trades | Kauf-/Verkaufsdaten, falls «Aggregierte Beträge» fehlt |
 
-Ohne Trade-Export legt die App aus dem PDF einen **geschätzten** Kauf an (Ø-Kurs, Datum geschätzt).
-Er ist gelb markiert und wird beim Import des Trade-Exports automatisch ersetzt.
+Mit «Aggregierte Beträge» übernimmt die App die Tageswerte von Saxo 1:1. Gewinn, Rendite (TWR)
+und Kosten stimmen exakt mit dem Saxo-Bericht überein. «Aktualisieren» schreibt den Bestand danach
+mit Marktkursen bis heute fort und lädt Benchmarks sowie Sektoren und Länder.
+
+Nur mit dem PDF legt die App einen **geschätzten** Kauf an (Ø-Kurs, Datum geschätzt). Er ist gelb
+markiert und wird beim Import eines der Excel-Exporte automatisch ersetzt.
 
 ## Wie gerechnet wird
 

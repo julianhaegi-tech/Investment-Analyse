@@ -11,6 +11,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from . import __version__
 from .analytics import compute, estimate_trade_from_report
 from .db import Database
+from .importers.saxo_ledger import is_ledger_workbook, parse_ledger
 from .importers.saxo_pdf import parse_saxo_pdf
 from .importers.saxo_trades import parse_trades_file
 from .insights import build_insights
@@ -58,6 +59,8 @@ def create_app(db: Database | None = None) -> Flask:
             with lock:
                 if name.lower().endswith(".pdf"):
                     return jsonify(_import_report(app.db, content))
+                if name.lower().endswith((".xlsx", ".xls", ".xlsm")) and is_ledger_workbook(content):
+                    return jsonify(_import_ledger(app.db, content))
                 return jsonify(_import_trades(app.db, content, name))
         except Exception as e:  # noqa: BLE001
             return jsonify({"error": str(e)}), 400
@@ -139,6 +142,8 @@ def _import_report(db: Database, content: bytes) -> dict:
     db.add_report(rep)
     created = []
     existing = {t["isin"] for t in db.trades()}
+    if db.ledger():  # Saxo-Tagesdaten vorhanden – keine Schätzung nötig
+        existing |= {h.get("isin") for h in rep.get("holdings", [])}
     for h in rep.get("holdings", []):
         if not h.get("isin"):
             continue
@@ -149,6 +154,16 @@ def _import_report(db: Database, content: bytes) -> dict:
     return {"type": "report", "period": [rep.get("period_start"), rep.get("period_end")],
             "holdings": len(rep.get("holdings", [])), "estimated_trades": created,
             "warnings": rep.get("warnings", [])}
+
+
+def _import_ledger(db: Database, content: bytes) -> dict:
+    led = parse_ledger(content)
+    db.set_ledger(led)
+    db.delete_all_estimated_trades()
+    return {"type": "ledger", "period": [led["period_start"], led["period_end"]],
+            "instruments": [i["name"] for i in led["instruments"]],
+            "trades": sum(1 for m in led["movements"] if m["kind"] == "trade"),
+            "deposits": round(sum(d["amount_chf"] for d in led["deposits"]), 2)}
 
 
 def _import_trades(db: Database, content: bytes, name: str) -> dict:

@@ -41,8 +41,8 @@
     <ol>
       <li><b>Saxo-Portfolio-Bericht (PDF) importieren.</b> SaxoTraderGO → Konto → Berichte → Portfolio-Bericht.
           Liefert Bestand, Kosten, Quartalsrenditen und frühere ETFs.</li>
-      <li><b>Trade-Export importieren (Excel).</b> SaxoTraderGO → Konto → Historie → Trades, Zeitraum ab Kontoeröffnung, Export nach Excel.
-          Damit kennt die App jeden Kauf und Verkauf mit Datum, Kurs und Kosten.</li>
+      <li><b>Saxo-Export «Aggregierte Beträge» importieren (Excel, empfohlen).</b> SaxoTraderGO → Konto → Berichte → Aggregierte Beträge, Zeitraum ab Kontoeröffnung, Export nach Excel.
+          Enthält jeden Kauf/Verkauf, alle Kosten, Einzahlungen und Tageswerte.</li>
       <li><b>Aktualisieren klicken.</b> Lädt Kurse, Wechselkurse, Benchmarks sowie Sektoren, Länder und Top-Positionen deiner ETFs.</li>
     </ol>
   </section>
@@ -78,13 +78,13 @@
 
   <section data-panel="positions" class="tab-panel">
     <div class="grid">
-      <div class="card span2"><h3>Wert je ETF über die Zeit (CHF)</h3><div id="ch-stack" class="chart"></div></div>
+      <div class="card span2"><h3>Wert je ETF über die Zeit (CHF)</h3><div id="ch-stack" class="chart"></div><div id="stack-legend" class="html-legend"></div></div>
       <div class="card span2"><h3>Kursverlauf mit Käufen und Verkäufen</h3>
         <select id="px-select"></select><div id="ch-price" class="chart"></div></div>
       <div class="card span2"><h3>Alle ETFs (offen und verkauft)</h3><div id="pos-table"></div></div>
       <div class="card span2">
         <h3>Transaktionen</h3>
-        <p class="muted">Geschätzte Einträge (aus dem Saxo-Bericht) sind markiert. Ersetze sie durch den Trade-Export oder korrigiere das Datum.</p>
+        <p class="muted" id="trade-hint">Geschätzte Einträge (aus dem Saxo-Bericht) sind markiert. Ersetze sie durch den Trade-Export oder korrigiere das Datum.</p>
         <div id="trade-table"></div>
         <details class="add-trade"><summary>Transaktion manuell erfassen</summary>
           <form id="trade-form" class="form-grid">
@@ -112,6 +112,7 @@
       <div class="card"><h3>Gewinn/Verlust und Kosten je Quartal (CHF)</h3><div id="ch-q-pnl" class="chart"></div></div>
       <div class="card"><h3>G/V je ETF im Berichtszeitraum (CHF)</h3><div id="ch-inst" class="chart"></div></div>
       <div class="card"><h3>Kosten nach Art (CHF)</h3><div id="ch-costs" class="chart"></div></div>
+      <div class="card span2"><h3>Kosten je ETF (CHF)</h3><div id="ch-costs-etf" class="chart"></div></div>
       <div class="card span2"><h3>Kontowert an Stichtagen (CHF)</h3><div id="ch-acct" class="chart"></div></div>
     </div>
   </section>
@@ -125,8 +126,8 @@
         <button id="bm-add" class="btn ghost">+ Benchmark</button>
       </div>
       <div class="card">
-        <h3>Ticker-Zuordnung</h3>
-        <p class="muted">Leer = automatisch per ISIN. Nur ausfüllen, wenn falsche Kurse geladen werden (z. B. <code>XYZ.DE</code>).</p>
+        <h3>Ticker &amp; ISIN</h3>
+        <p class="muted">Leer = automatisch. Ticker nur ausfüllen, wenn falsche Kurse geladen werden (z. B. <code>WELA.DE</code>). Die ISIN wird für Sektoren und Länder (justETF) gebraucht.</p>
         <div id="sym-list"></div>
       </div>
       <div class="card">

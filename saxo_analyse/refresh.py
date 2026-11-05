@@ -31,14 +31,30 @@ def refresh_all(db: Database, md: MarketData | None = None) -> dict[str, Any]:
         steps.append({"step": name, "ok": ok, "message": msg})
 
     instruments: dict[str, dict] = {}
-    for t in db.trades():
-        instruments.setdefault(t["isin"], {"isin": t["isin"], "name": t.get("name"),
-                                           "currency": t.get("currency")})
-    for isin, inst in list(instruments.items()):
-        stored = db.get_instrument(isin) or {}
-        inst["currency"] = stored.get("currency") or inst.get("currency")
-        inst["name"] = stored.get("name") or inst.get("name")
-        inst["yahoo_symbol"] = stored.get("yahoo_symbol")
+    ledger = db.ledger()
+    if ledger:
+        from .ledger_analytics import ledger_instruments
+
+        last = ledger["period_end"]
+        open_syms = {r["symbol"] for r in ledger["inst_daily"]
+                     if r["date"] == last and (r.get("value_chf") or 0) > 0.5}
+        for li in ledger_instruments(db, ledger):
+            instruments[li["key"]] = {
+                "isin": li["key"], "real_isin": li.get("isin"), "name": li.get("name"),
+                "currency": li.get("currency"), "yahoo_symbol": li.get("yahoo_symbol"),
+                "trusted_symbol": True, "exposure": li["symbol"] in open_syms,
+            }
+            db.upsert_instrument(li["key"], li.get("name"), li.get("currency"), li.get("yahoo_symbol"),
+                                 {"saxo_symbol": li["symbol"], "isin": li.get("isin")})
+    else:
+        for t in db.trades():
+            instruments.setdefault(t["isin"], {"isin": t["isin"], "real_isin": t["isin"], "name": t.get("name"),
+                                               "currency": t.get("currency"), "exposure": True})
+        for isin, inst in list(instruments.items()):
+            stored = db.get_instrument(isin) or {}
+            inst["currency"] = stored.get("currency") or inst.get("currency")
+            inst["name"] = stored.get("name") or inst.get("name")
+            inst["yahoo_symbol"] = stored.get("yahoo_symbol")
 
     currencies: set[str] = set()
     overrides = settings.get("symbol_overrides") or {}
@@ -53,26 +69,29 @@ def refresh_all(db: Database, md: MarketData | None = None) -> dict[str, Any]:
             candidates.append(overrides[isin])
         if inst.get("yahoo_symbol"):
             candidates.append(inst["yahoo_symbol"])
-        try:
-            candidates += md.resolve_symbol(isin, cur)
-        except Exception as e:  # noqa: BLE001
-            step(f"Ticker-Suche {label}", False, f"Yahoo-Suche fehlgeschlagen: {e}")
+        real_isin = inst.get("real_isin")
+        if real_isin:
+            try:
+                candidates += md.resolve_symbol(real_isin, cur)
+            except Exception as e:  # noqa: BLE001
+                step(f"Ticker-Suche {label}", False, f"Yahoo-Suche fehlgeschlagen: {e}")
+        trusted = {overrides.get(isin)} | ({inst.get("yahoo_symbol")} if inst.get("trusted_symbol") else set())
         for sym in dict.fromkeys(candidates):
             try:
                 ccy, pts = md.yahoo_chart(sym, start)
-                if cur and ccy and ccy.upper() != cur.upper() and sym != overrides.get(isin):
+                if cur and ccy and ccy.upper() != cur.upper() and sym not in trusted:
                     continue  # andere Börse/Währung – nächsten Kandidaten versuchen
                 db.save_series(f"PX:{isin}", pts, ccy or cur, f"Yahoo Finance ({sym})", label)
-                db.upsert_instrument(isin, inst.get("name"), cur or ccy, sym)
-                cur = cur or ccy
+                cur = ccy or cur
+                db.upsert_instrument(isin, inst.get("name"), cur, sym)
                 step(f"Kurse {label}", True, f"{len(pts)} Tageskurse via Yahoo ({sym}, {ccy})")
                 got = True
                 break
             except Exception:  # noqa: BLE001
                 continue
-        if not got and cur:
+        if not got and cur and real_isin:
             try:
-                pts = md.justetf_chart(isin, cur, start)
+                pts = md.justetf_chart(real_isin, cur, start)
                 db.save_series(f"PX:{isin}", pts, cur, "justETF", label)
                 step(f"Kurse {label}", True, f"{len(pts)} Tageskurse via justETF ({cur})")
                 got = True
@@ -83,10 +102,14 @@ def refresh_all(db: Database, md: MarketData | None = None) -> dict[str, Any]:
         if cur and cur != BASE:
             currencies.add(cur)
 
-        # --- Zusammensetzung (nur für ETFs relevant, schadet sonst nicht)
+        # --- Zusammensetzung (nur für gehaltene ETFs)
+        if not inst.get("exposure", True):
+            continue
         today = date.today().isoformat()
         try:
-            prof = md.justetf_profile(isin)
+            if not real_isin:
+                raise ValueError("ISIN unbekannt (in Einstellungen ergänzen)")
+            prof = md.justetf_profile(real_isin)
             n = 0
             for kind in ("sector", "country", "holding"):
                 if prof.get(kind):

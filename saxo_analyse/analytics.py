@@ -17,7 +17,7 @@ BASE = "CHF"
 # --------------------------------------------------------------------------- Helpers
 def _series(points: list[tuple[str, float]]) -> pd.Series:
     if not points:
-        return pd.Series(dtype=float)
+        return pd.Series(dtype=float, index=pd.DatetimeIndex([]))
     s = pd.Series({pd.Timestamp(d): v for d, v in points}, dtype=float).sort_index()
     return s[~s.index.duplicated(keep="last")]
 
@@ -137,6 +137,16 @@ def compute(db: Database) -> dict[str, Any]:
         "has_data": False,
         "warnings": [],
     }
+    ledger = db.ledger()
+    if ledger:
+        from .ledger_analytics import compute_ledger
+
+        if any(not t.get("estimated") for t in db.trades()):
+            state["warnings"].append(
+                "Es ist ein Saxo-Export «Aggregierte Beträge» importiert. Er ist massgebend; manuell erfasste "
+                "Transaktionen werden in der Auswertung nicht berücksichtigt.")
+        return compute_ledger(db, ledger, state)
+
     if inp.trades.empty:
         if inp.report:
             state["warnings"].append(

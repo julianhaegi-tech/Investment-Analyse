@@ -89,7 +89,7 @@ function renderKpis(s) {
     kpi("Zeitgewichtet (TWR)", fmtPct(k.twr_pct), k.twr_pa_pct != null ? fmtPct(k.twr_pa_pct) + " p.a." : "seit Start", k.twr_pct),
     kpi("Max. Drawdown", fmtPct(k.max_drawdown_pct), k.max_drawdown_date ? "am " + fmtDate(k.max_drawdown_date) : ""),
     kpi("Währungseffekt", fmtCHF(k.fx_effect), "auf offene Positionen", k.fx_effect),
-    kpi("Kosten (Saxo)", fmtCHF(s.report?.costs?.total), s.report?.costs?.total_pct != null ? fmtPct(s.report.costs.total_pct, false) + " des Ø-Kapitals" : "Kostenübersicht im Bericht"),
+    (() => { const c = s.ledger_costs || s.report?.costs || {}; return kpi("Kosten (Saxo)", fmtCHF(c.total), c.total_pct != null ? fmtPct(c.total_pct, false) + " des Ø-Kapitals" : "Courtage, Stempel, Devisen, TER"); })(),
   ].join("");
 }
 
@@ -122,11 +122,14 @@ function renderPerformance(s) {
   plot("ch-twr", traces, { yaxis: { gridcolor: css("--grid"), ticksuffix: " %", zerolinecolor: css("--border") } });
 
   const k = s.kpis;
-  const items = [["Realisiert (verkaufte ETFs)", k.realized_pnl], ["Kursgewinn offene Pos.", k.price_effect], ["Währung offene Pos.", k.fx_effect], ["Total", k.pnl]].reverse();
+  const items = [["Realisiert (verkaufte ETFs)", k.realized_pnl], ["Kursgewinn offene Pos.", k.price_effect], ["Währung offene Pos.", k.fx_effect]];
+  if (k.open_fees) items.push(["Gebühren offene Pos.", -k.open_fees]);
+  items.push(["Total", k.pnl]);
+  items.reverse();
   plot("ch-decomp", [{
-    type: "bar", orientation: "h", y: items.map((i) => i[0]), x: items.map((i) => i[1] ?? 0),
+    type: "bar", orientation: "h", y: items.map((i) => ((i[1] ?? 0) < 0 ? `${i[0]}  ${fmtCHF(i[1])}` : i[0])), x: items.map((i) => i[1] ?? 0),
     marker: { color: items.map((i) => ((i[1] ?? 0) >= 0 ? css("--pos") : css("--neg"))) },
-    text: items.map((i) => fmtCHF(i[1])), textposition: items.map((i) => ((i[1] ?? 0) < 0 ? "inside" : "outside")), insidetextfont: { color: "#fff" }, cliponaxis: false, hovertemplate: "%{y}: %{text}<extra></extra>",
+    text: items.map((i) => fmtCHF(i[1])), textposition: items.map((i) => ((i[1] ?? 0) < 0 ? "none" : "outside")), cliponaxis: false, hovertemplate: "%{text}<extra></extra>",
   }], { hovermode: "closest", margin: { l: 180, r: 70, t: 8, b: 30 }, xaxis: { gridcolor: css("--grid"), tickformat: ",.0f", zerolinecolor: css("--border") }, yaxis: { automargin: true } });
 
   const sim = [{ x: s.series.value.x, y: s.series.value.y, name: "Dein Depot", mode: "lines", line: { color: col[0], width: 2 }, hovertemplate: "%{y:,.0f} CHF" }];
@@ -178,7 +181,8 @@ function renderPositions(s) {
   plot("ch-stack", pos.map((p, i) => {
     const ser = s.series.by_instrument[p.isin];
     return { x: ser.x, y: ser.y, name: p.name, stackgroup: "one", mode: "lines", line: { width: 1, color: col[i % 8] }, hovertemplate: "%{y:,.0f} CHF" };
-  }), { yaxis: { gridcolor: css("--grid"), tickformat: ",.0f" } });
+  }), { yaxis: { gridcolor: css("--grid"), tickformat: ",.0f" }, showlegend: false, margin: { l: 56, r: 16, t: 8, b: 36 } });
+  $("#stack-legend").innerHTML = pos.map((p, i) => `<span><i style="background:${col[i % 8]}"></i>${esc(p.name)}</span>`).join("");
 
   const sel = $("#px-select");
   const prev = sel.value;
@@ -186,13 +190,31 @@ function renderPositions(s) {
   if (prev && pos.some((p) => p.isin === prev)) sel.value = prev;
   renderPrice();
 
-  $("#pos-table").innerHTML = pos.length ? `<div class="table-wrap"><table><tr><th>ETF</th><th>Status</th><th class="num">Stück</th><th class="num">Ø-Kurs</th><th class="num">Kurs</th><th class="num">Wert CHF</th><th class="num">Unrealisiert</th><th class="num">Realisiert</th><th class="num">Total G/V</th><th>Kursquelle</th></tr>
-    ${pos.map((p) => `<tr><td>${esc(p.name)}<br><span class="muted">${esc(p.isin)} · ${esc(p.currency)}</span></td>
-      <td><span class="tag">${p.open ? "offen" : "verkauft"}</span></td><td class="num">${fmtNum(p.quantity, 0)}</td>
-      <td class="num">${p.avg_price ? fmtNum(p.avg_price, 3) : "–"}</td><td class="num">${fmtNum(p.price, 3)}</td>
-      <td class="num">${fmtCHF(p.market_value)}</td><td class="num">${fmtCHF(p.unrealized_pnl)}</td><td class="num">${fmtCHF(p.realized_pnl)}</td>
-      <td class="num"><b>${fmtCHF(p.total_pnl)}</b></td><td class="muted">${esc(p.price_source)}</td></tr>`).join("")}</table></div>` : "";
+  $("#pos-table").innerHTML = pos.length ? `<div class="table-wrap"><table><tr><th>ETF</th><th>Status</th><th>Gehalten</th><th class="num">Stück</th><th class="num">Ø-Kurs</th><th class="num">Wert CHF</th><th class="num">Gekauft / Verkauft CHF</th><th class="num">Kosten</th><th class="num">Total G/V</th><th class="num">Rendite</th></tr>
+    ${pos.map((p) => `<tr><td>${esc(p.name)}<br><span class="muted">${[p.real_isin || (p.saxo_symbol ? "" : p.isin), p.currency, p.saxo_symbol].filter(Boolean).map(esc).join(" · ")}</span></td>
+      <td><span class="tag">${p.open ? "offen" : "verkauft"}</span></td>
+      <td class="muted">${fmtDate(p.first_buy)} – ${p.open ? "heute" : fmtDate(p.last_trade)}</td>
+      <td class="num">${p.quantity != null ? fmtNum(p.quantity, 0) : "–"}</td>
+      <td class="num">${p.avg_price ? fmtNum(p.avg_price, 3) : "–"}</td>
+      <td class="num">${fmtCHF(p.market_value)}</td>
+      <td class="num">${fmtCHF(p.bought_chf)} / ${fmtCHF(p.sold_chf ?? null)}</td>
+      <td class="num">${fmtCHF((p.fees || 0) + (p.fx_costs || 0) + (p.product_costs || 0), 0)}</td>
+      <td class="num"><b>${fmtCHF(p.total_pnl)}</b></td><td class="num">${fmtPct(p.return_pct)}</td></tr>`).join("")}</table></div>
+      <p class="muted">Total G/V inkl. aller Kosten (wie im Saxo-Bericht). Rendite = G/V ÷ gekaufter Betrag.</p>` : "";
 
+  if (s.mode === "saxo_ledger") {
+    const lt = s.ledger_trades || [];
+    $("#trade-table").innerHTML = `<p class="muted">Aus dem Saxo-Export «Aggregierte Beträge» (${fmtDate(s.ledger_info?.period_start)} – ${fmtDate(s.ledger_info?.period_end)}). Nur lesbar; für Änderungen den Export neu importieren.</p>
+      <div class="table-wrap"><table><tr><th>Datum</th><th>ETF</th><th>Art</th><th class="num">Betrag Whg.</th><th class="num">Betrag CHF</th><th class="num">FX→CHF</th><th class="num">Courtage + Stempel</th></tr>
+      ${lt.slice().sort((a, b) => a.trade_date.localeCompare(b.trade_date)).map((t) => `<tr><td>${fmtDate(t.trade_date)}</td><td>${esc(t.name)}</td><td>${t.side === "BUY" ? "Kauf" : "Verkauf"}</td>
+        <td class="num">${fmtNum(t.amount_ccy, 2)} ${esc(t.currency || "")}</td><td class="num">${fmtNum(t.amount_chf, 2)}</td>
+        <td class="num">${t.fx_rate ? fmtNum(t.fx_rate, 4) : "–"}</td><td class="num">${fmtNum(t.fees_chf, 2)}</td></tr>`).join("")}</table></div>`;
+    document.querySelector(".add-trade").hidden = true;
+    $("#trade-hint").hidden = true;
+    return;
+  }
+  document.querySelector(".add-trade").hidden = false;
+  $("#trade-hint").hidden = false;
   const tr = s.trades || [];
   $("#trade-table").innerHTML = tr.length ? `<div class="table-wrap"><table><tr><th>Datum</th><th>ETF</th><th>Art</th><th class="num">Stück</th><th class="num">Kurs</th><th>Whg.</th><th class="num">FX→CHF</th><th class="num">Gebühren</th><th class="num">Betrag CHF</th><th></th></tr>
     ${tr.map((t) => `<tr class="${t.estimated ? "est" : ""}" data-id="${t.id}">
@@ -210,14 +232,24 @@ function renderPositions(s) {
 
 function renderPrice() {
   const p = (STATE.positions || []).find((x) => x.isin === $("#px-select").value);
-  if (!p || !p.price_series) return plot("ch-price", []);
+  if (!p) return plot("ch-price", []);
+  if (!p.price_series) {
+    const v = STATE.series.by_instrument[p.isin];
+    const at = (d) => { const i = v.x.findIndex((x) => x >= d); return i >= 0 ? v.y[i] : null; };
+    return plot("ch-price", [
+      { x: v.x, y: v.y, name: "Positionswert CHF (Saxo)", mode: "lines", line: { color: SERIES()[0], width: 2 }, hovertemplate: "%{y:,.0f} CHF", connectgaps: false },
+      { x: p.trades.map((t) => t.date), y: p.trades.map((t) => at(t.date)), mode: "markers", name: "Trades",
+        marker: { size: 13, symbol: p.trades.map((t) => (t.side === "BUY" ? "triangle-up" : "triangle-down")), color: p.trades.map((t) => (t.side === "BUY" ? css("--good") : css("--bad"))), line: { color: css("--surface"), width: 2 } },
+        text: p.trades.map((t) => `${t.side === "BUY" ? "Kauf" : "Verkauf"} ${fmtCHF(t.value_chf)}`), hovertemplate: "%{text}<extra></extra>" },
+    ], { yaxis: { gridcolor: css("--grid"), tickformat: ",.0f" } });
+  }
   const [c1] = SERIES();
   const t = p.trades;
   plot("ch-price", [
     { x: p.price_series.x, y: p.price_series.y, name: `Kurs (${p.currency})`, mode: "lines", line: { color: c1, width: 2 }, hovertemplate: "%{y:.3f} " + p.currency },
     { x: t.map((x) => x.date), y: t.map((x) => x.price), mode: "markers", name: "Trades",
       marker: { size: 13, symbol: t.map((x) => (x.side === "BUY" ? "triangle-up" : "triangle-down")), color: t.map((x) => (x.side === "BUY" ? css("--good") : css("--bad"))), line: { color: css("--surface"), width: 2 } },
-      text: t.map((x) => `${x.side === "BUY" ? "Kauf" : "Verkauf"} ${fmtNum(x.quantity, 0)} @ ${fmtNum(x.price, 3)} (${fmtCHF(x.value_chf)})`), hovertemplate: "%{text}<extra></extra>" },
+      text: t.map((x) => `${x.side === "BUY" ? "Kauf" : "Verkauf"} ${x.quantity != null ? fmtNum(x.quantity, 0) + " @ " + fmtNum(x.price, 3) + " " : ""}(${fmtCHF(x.value_chf)})`), hovertemplate: "%{text}<extra></extra>" },
   ], { yaxis: { gridcolor: css("--grid") } });
 }
 
@@ -238,18 +270,33 @@ function renderSaxo(s) {
   ], { yaxis: { gridcolor: css("--grid"), tickformat: ",.0f" } });
   const inst = r.instrument_pnl || [];
   plot("ch-inst", [{
-    type: "bar", orientation: "h", y: inst.map((x) => x.name), x: inst.map((x) => x.pnl),
+    type: "bar", orientation: "h", y: inst.map((x) => (x.pnl < 0 ? `${x.name}  ${fmtCHF(x.pnl)}` : x.name)), x: inst.map((x) => x.pnl),
     marker: { color: inst.map((x) => (x.pnl >= 0 ? css("--pos") : css("--neg"))) },
-    text: inst.map((x) => `${fmtCHF(x.pnl)} (${fmtPct(x.return_pct)})`), textposition: inst.map((x) => (x.pnl < 0 ? "inside" : "outside")), insidetextfont: { color: "#fff" }, cliponaxis: false,
+    text: inst.map((x) => `${fmtCHF(x.pnl)} (${fmtPct(x.return_pct)})`), textposition: inst.map((x) => (x.pnl < 0 ? "none" : "outside")), cliponaxis: false,
     customdata: inst.map((x) => fmtCHF(x.costs, 2)), hovertemplate: "%{y}<br>G/V %{text}<br>Kosten %{customdata}<extra></extra>",
-  }], { hovermode: "closest", margin: { l: 230, r: 110, t: 8, b: 30 }, xaxis: { gridcolor: css("--grid"), tickformat: ",.0f", zerolinecolor: css("--border") }, yaxis: { automargin: true, autorange: "reversed" } });
+  }], { hovermode: "closest", margin: { l: 230, r: 110, t: 8, b: 30 }, xaxis: { gridcolor: css("--grid"), tickformat: ",.0f", zerolinecolor: css("--border"), tickangle: 0, nticks: 4 }, yaxis: { automargin: true, autorange: "reversed" } });
+  const lc = s.ledger_costs;
   const c = r.costs || {};
-  const items = [["Devisenumrechnung", c.fx_conversion], ["Courtage", c.commission], ["Stempelsteuer Ausland", c.stamp_duty_foreign], ["Stempelsteuer Inland", c.stamp_duty_domestic], ["Produktkosten (TER)", c.product_costs]].filter((x) => x[1]);
+  const items = lc ? [["Devisenumrechnung", lc.fx_conversion], ["Courtage", lc.commission], ["Stempelsteuer", lc.stamp_duty], ["Produktkosten (TER)", lc.product_costs]].filter((x) => x[1])
+    : [["Devisenumrechnung", c.fx_conversion], ["Courtage", c.commission], ["Stempelsteuer Ausland", c.stamp_duty_foreign], ["Stempelsteuer Inland", c.stamp_duty_domestic], ["Produktkosten (TER)", c.product_costs]].filter((x) => x[1]);
+  renderCostsByEtf(s);
   hbar("ch-costs", items.map(([name, v]) => ({ name, v })).sort((a, b) => b.v - a.v), "v", (x) => fmtCHF(x.v, 2), c1);
+  $("#ch-acct").closest(".card").hidden = s.mode === "saxo_ledger";
   const vt = (r.value_table || []).filter((x) => x.account > 0);
   plot("ch-acct", [
     { x: vt.map((x) => x.date), y: vt.map((x) => x.account), name: "Kontowert", mode: "lines+markers", line: { color: c1, width: 2 }, marker: { size: 8 }, hovertemplate: "%{y:,.2f} CHF" },
   ], { yaxis: { gridcolor: css("--grid"), tickformat: ",.0f" } });
+}
+
+function renderCostsByEtf(s) {
+  const rows = s.ledger_costs?.by_instrument || [];
+  if (!rows.length) return plot("ch-costs-etf", []);
+  const kinds = [["commission", "Courtage"], ["stamp_duty", "Stempelsteuer"], ["fx_conversion", "Devisen"], ["product_costs", "TER"]];
+  const col = SERIES();
+  plot("ch-costs-etf", kinds.map(([k, label], i) => ({
+    type: "bar", orientation: "h", name: label, y: rows.map((r) => r.name), x: rows.map((r) => r[k] || 0),
+    marker: { color: col[i], line: { color: css("--surface"), width: 2 } }, hovertemplate: `${label}: %{x:.2f} CHF<extra></extra>`,
+  })), { barmode: "stack", hovermode: "closest", legend: { orientation: "h", y: -0.18, x: 0, traceorder: "normal" }, margin: { l: 250, r: 16, t: 8, b: 30 }, yaxis: { automargin: true }, xaxis: { gridcolor: css("--grid") } });
 }
 
 function renderSettings(s) {
@@ -257,11 +304,14 @@ function renderSettings(s) {
   $("#rf").value = st.risk_free_rate ?? 0;
   $("#data-path").textContent = "Datenbank: " + s.data_path;
   $("#bm-list").innerHTML = (st.benchmarks || []).map((b, i) => `<div class="row" data-i="${i}"><input data-k="symbol" value="${esc(b.symbol)}" placeholder="Ticker"><input data-k="label" value="${esc(b.label)}" placeholder="Name"><button class="icon btn ghost" data-bmdel="${i}">✕</button></div>`).join("");
-  const isins = [...new Set((s.trades || []).map((t) => t.isin))];
   const ov = st.symbol_overrides || {};
-  $("#sym-list").innerHTML = isins.map((i) => {
-    const inst = (s.instruments || []).find((x) => x.isin === i);
-    return `<label>${esc(inst?.name || i)} <span class="muted">(${esc(i)}, aktuell: ${esc(inst?.yahoo_symbol || "–")})</span><input data-isin="${esc(i)}" value="${esc(ov[i] || "")}" placeholder="automatisch"></label>`;
+  const iov = st.isin_overrides || {};
+  const items = (s.positions && s.positions.length) ? s.positions : [...new Set((s.trades || []).map((t) => t.isin))].map((i) => ({ isin: i, name: (s.instruments || []).find((x) => x.isin === i)?.name }));
+  $("#sym-list").innerHTML = items.map((p) => {
+    const inst = (s.instruments || []).find((x) => x.isin === p.isin);
+    const isinField = p.saxo_symbol ? `<input data-isin-for="${esc(p.saxo_symbol)}" value="${esc(iov[p.saxo_symbol] || "")}" placeholder="ISIN ${p.real_isin ? "(" + esc(p.real_isin) + ")" : "– für Sektoren/Länder nötig"}">` : "";
+    return `<div class="sym-item"><b>${esc(p.name || p.isin)}</b> <span class="muted">Ticker aktuell: ${esc(inst?.yahoo_symbol || p.symbol || "–")}</span>
+      <div class="row"><input data-isin="${esc(p.isin)}" value="${esc(ov[p.isin] || "")}" placeholder="Yahoo-Ticker (automatisch)">${isinField}</div></div>`;
   }).join("") || '<p class="muted">Noch keine ETFs.</p>';
   const lr = s.last_refresh;
   $("#refresh-log").innerHTML = lr ? `<ul class="steps">${lr.details.map((d) => `<li class="${d.ok ? "ok" : "fail"}"><b>${esc(d.step)}:</b> ${esc(d.message)}</li>`).join("")}</ul>` : '<p class="muted">Noch kein Refresh.</p>';
@@ -272,8 +322,10 @@ function collectSettings() {
     symbol: r.querySelector('[data-k="symbol"]').value.trim(), label: r.querySelector('[data-k="label"]').value.trim(),
   })).filter((b) => b.symbol);
   const symbol_overrides = {};
-  document.querySelectorAll("#sym-list input").forEach((i) => { if (i.value.trim()) symbol_overrides[i.dataset.isin] = i.value.trim(); });
-  return { benchmarks, symbol_overrides, risk_free_rate: parseFloat($("#rf").value) || 0 };
+  document.querySelectorAll("#sym-list input[data-isin]").forEach((i) => { if (i.value.trim()) symbol_overrides[i.dataset.isin] = i.value.trim(); });
+  const isin_overrides = {};
+  document.querySelectorAll("#sym-list input[data-isin-for]").forEach((i) => { if (i.value.trim()) isin_overrides[i.dataset.isinFor] = i.value.trim().toUpperCase(); });
+  return { benchmarks, symbol_overrides, isin_overrides, risk_free_rate: parseFloat($("#rf").value) || 0 };
 }
 
 // ---------- Events ----------
@@ -302,7 +354,8 @@ $("#file-input").addEventListener("change", async (ev) => {
   const fd = new FormData(); fd.append("file", f);
   try {
     const r = await api("/api/import", { method: "POST", body: fd });
-    if (r.type === "report") toast(`Saxo-Bericht importiert (${fmtDate(r.period[0])} – ${fmtDate(r.period[1])}).` + (r.estimated_trades.length ? `\nGeschätzter Kauf angelegt für: ${r.estimated_trades.join(", ")}. Für exakte Daten den Trade-Export importieren.` : ""), 9000);
+    if (r.type === "ledger") toast(`Saxo-Export importiert (${fmtDate(r.period[0])} – ${fmtDate(r.period[1])}): ${r.instruments.length} ETFs, ${r.trades} Käufe/Verkäufe, Einzahlungen ${fmtCHF(r.deposits, 2)}.\nKlicke auf «Aktualisieren» für Kurse, Benchmarks und Sektoren.`, 10000);
+    else if (r.type === "report") toast(`Saxo-Bericht importiert (${fmtDate(r.period[0])} – ${fmtDate(r.period[1])}).` + (r.estimated_trades.length ? `\nGeschätzter Kauf angelegt für: ${r.estimated_trades.join(", ")}. Für exakte Daten den Trade-Export importieren.` : ""), 9000);
     else toast(`${r.added} Transaktionen importiert, ${r.skipped_duplicates} Duplikate übersprungen.` + (r.warnings.length ? "\n" + r.warnings.slice(0, 5).join("\n") : ""), 9000);
     await load();
   } catch (e) { toast("Import fehlgeschlagen: " + e.message, 12000); }
