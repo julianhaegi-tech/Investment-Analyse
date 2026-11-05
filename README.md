@@ -1,95 +1,37 @@
-# Saxo Portfolio Analyse
+# Saxo Portfolio
 
-Lokale Desktop-App zur nachträglichen Analyse eines Saxo-Depots. Sie läuft als einzelne `.exe`,
-öffnet sich im Browser, speichert alles in einer lokalen SQLite-Datenbank und lädt Marktdaten
-per Klick auf **Aktualisieren** aus kostenlosen Quellen.
-
-## Funktionen
-
-- **Import**
-  - Saxo **Portfolio-Bericht (PDF)**: Bestand, Ø-Kaufkurs, Kontowert pro Stichtag,
-    Quartalsrenditen vs. Saxo-Benchmark, G/V je ETF (auch bereits verkaufte), Kostenübersicht
-  - Saxo **«Aggregierte Beträge» (Excel)**: tägliche Werte, alle Käufe/Verkäufe, Kosten, Einzahlungen
-  - Saxo **Trade-Export (Excel/CSV)**: jeder Kauf und Verkauf mit Datum, Stückzahl, Kurs und Gebühren.
-    Deutsche und englische Spaltennamen werden automatisch erkannt.
-  - Manuelle Erfassung bzw. Korrektur von Transaktionen in der App
-- **Aktualisieren** (z. B. einmal im Monat)
-  - Tageskurse aller ETFs (Yahoo Finance, Fallback: justETF)
-  - Wechselkurse nach CHF (Yahoo, Fallback: EZB via Frankfurter)
-  - Benchmarks, frei wählbar, z. B. SMI und MSCI ACWI, umgerechnet in CHF
-  - Sektoren, Länder, Top-10-Positionen und Eckdaten (TER, Replikation …) der ETFs (justETF, Fallback: Yahoo)
-- **Auswertungen**
-  - Depotwert vs. eingezahltes Kapital, Wert je ETF über die Zeit (ETF-Wechsel sichtbar)
-  - Geldgewichtete Rendite (IRR) und zeitgewichtete Rendite (TWR)
-  - Vergleich mit Benchmarks, inklusive «gleiche Einzahlungen im Benchmark»
-  - Zerlegung des Gewinns: realisiert, Kursgewinn, Währungseffekt
-  - Monatsrenditen, Drawdown, Volatilität, Sharpe-Ratio
-  - Sektoren, Länder und Top-Positionen mit deinem CHF-Anteil
-  - Saxo-Kostenanalyse (je Art und je ETF), Kosten jeder Umschichtung, Quartalsvergleich
-  - Automatisch erzeugte Analyse in Textform
+Lokale Analyse eines Saxo-Depots – als Streamlit-App, gestartet über eine kleine `SaxoPortfolio.exe`
+(gleiches Prinzip wie «Finanzen»: `app\` + `Daten\` neben der .exe, kein Konsolenfenster).
 
 ## Installation (Windows)
 
-1. Auf GitHub unter **Actions → «Tests & Build» → neuester Lauf** das Artefakt
-   **SaxoAnalyse-Windows** herunterladen und entpacken. Für einen festen Download-Link einen Tag
-   `v1.0.0` pushen: Dann erscheint die `.exe` unter **Releases**.
-2. `SaxoAnalyse.exe` doppelklicken. Windows SmartScreen kann warnen, weil die Datei nicht signiert ist:
-   «Weitere Informationen → Trotzdem ausführen».
-3. Die App öffnet sich im Browser (`http://127.0.0.1:8765`). Zum Beenden das Konsolenfenster schliessen
-   oder in der App auf **Beenden** klicken.
+1. `SaxoPortfolio.zip` entpacken und den Ordner **SaxoPortfolio** z. B. auf den Desktop legen.
+2. `SaxoPortfolio.exe` doppelklicken. Beim ersten Start werden die Python-Pakete einmalig installiert (1–2 Min).
+3. Im Browser links den **Transaktions- und Saldenbericht (PDF)** hineinziehen.
 
-Alternative ohne `.exe`: Python 3.10+ installieren und `start_windows.bat` (bzw. `start_mac_linux.sh`) ausführen.
+Voraussetzung: Python 3.11+ (python.org). Ports 8790–8799 (kollidiert nicht mit «Finanzen», 8765–8784).
 
-## Daten aus Saxo exportieren
+## Einziger Import
 
-| Was | Wo in SaxoTraderGO | Wofür |
-|---|---|---|
-| **Aggregierte Beträge (Excel)**, empfohlen | Konto → Berichte → Aggregierte Beträge, Zeitraum ab Kontoeröffnung → Export | jeder Kauf/Verkauf, alle Kosten, Einzahlungen, tägliche Positionswerte und Rendite |
-| Portfolio-Bericht (PDF) | Konto → Berichte → Portfolio-Bericht | ISIN und Stückzahl des Bestands, Quartalsvergleich mit Saxo-Benchmark |
-| Trades (Excel/CSV), Alternative | Konto → Historie → Trades | Kauf-/Verkaufsdaten, falls «Aggregierte Beträge» fehlt |
+SaxoTraderGO → Konto → Berichte → **Transaktions- und Saldenbericht** → Zeitraum ab Kontoeröffnung → PDF.
+Daraus liest die App alle Käufe/Verkäufe (Menge, Kurs, Wechselkurs, Betrag, Kosten), Einzahlungen,
+Bestand (inkl. ISIN) und realisierte Gewinne. Depotwert, Gewinn, realisierte G/V und Kosten stimmen
+exakt mit Saxo überein – auch ohne Internet.
 
-Mit «Aggregierte Beträge» übernimmt die App die Tageswerte von Saxo 1:1. Gewinn, Rendite (TWR)
-und Kosten stimmen exakt mit dem Saxo-Bericht überein. «Aktualisieren» schreibt den Bestand danach
-mit Marktkursen bis heute fort und lädt Benchmarks sowie Sektoren und Länder.
-
-Nur mit dem PDF legt die App einen **geschätzten** Kauf an (Ø-Kurs, Datum geschätzt). Er ist gelb
-markiert und wird beim Import eines der Excel-Exporte automatisch ersetzt.
-
-## Wie gerechnet wird
-
-- **Umschichtungen:** Verkaufserlöse bleiben als Cash im Konto und bezahlen den nächsten Kauf.
-  Nur der ungedeckte Teil eines Kaufs zählt als neue Einzahlung. Ein ETF-Wechsel erzeugt also
-  keinen Einbruch und keine doppelte Einzahlung.
-- **IRR (geldgewichtet):** deine persönliche Rendite p.a. Sie berücksichtigt, wann wie viel Geld investiert war.
-- **TWR (zeitgewichtet):** die Rendite der Anlage selbst, bereinigt um Einzahlungen. So rechnet auch Saxo.
-- **Währungseffekt:** `Stück × aktueller Kurs × (FX heute − Ø-FX beim Kauf)`. Der Ø-FX wird aus dem
-  CHF-Einstandswert berechnet (inkl. Gebühren).
-- **Benchmarks:** werden in CHF umgerechnet. Der «Was-wäre-wenn»-Vergleich investiert dieselben
-  Beträge an denselben Tagen in den Benchmark.
-
-## Datenschutz
-
-Alle Daten liegen lokal in `%APPDATA%\SaxoAnalyse\portfolio.db` (macOS: `~/Library/Application Support/SaxoAnalyse`).
-Nach aussen gehen nur Kursabfragen mit ISIN bzw. Ticker. Name, Adresse und Kontonummer aus dem
-PDF werden nicht gespeichert. `*.pdf`, `*.xlsx` und `*.db` sind per `.gitignore` vom Repository ausgeschlossen.
-
-## Grenzen der Gratis-Quellen
-
-Yahoo Finance und justETF sind inoffizielle, kostenlose Schnittstellen und können sich ändern.
-Darum hat jede Datenart einen Fallback. Was beim letzten Refresh geklappt hat, steht unter
-**Einstellungen → Letzter Refresh**. Lädt ein ETF falsche Kurse, unter **Einstellungen → Ticker-Zuordnung**
-den richtigen Yahoo-Ticker eintragen (z. B. eine Xetra-Notierung `….DE`).
+**Kurse aktualisieren** (optional) lädt kostenlos Tageskurse (Yahoo Finance, Fallback justETF),
+Wechselkurse (EZB), Benchmarks (MSCI ACWI, SMI) sowie Sektoren, Länder und Top-10 (justETF).
 
 ## Entwicklung
 
 ```bash
-pip install -r requirements.txt pytest
-python -m pytest -q        # Tests (ohne Netzwerk, mit Mock-Marktdaten)
-python run.py              # App starten
-pyinstaller SaxoAnalyse.spec --noconfirm   # .exe bauen (unter Windows)
+pip install -r app/requirements.txt pytest ziglang
+python -m pytest -q                 # Tests (anonymisierte Bericht-Tabellen als Fixture)
+streamlit run app/app.py            # App direkt starten
+python tools/build_package.py       # baut dist/SaxoPortfolio.zip inkl. Windows-.exe (Cross-Compile mit Zig)
 ```
 
-Struktur: `saxo_analyse/importers` (PDF/Excel), `market.py` (Datenquellen), `refresh.py` (Aktualisieren-Button),
-`analytics.py` (Berechnungen), `insights.py` (Analyse-Text), `app.py` (lokaler Server), `static/` (Oberfläche).
+Struktur: `app/portfolio/report.py` (PDF-Import), `analytics.py` (Berechnungen), `market.py` (Gratis-Marktdaten),
+`charts.py`, `insights.py`, `store.py` (SQLite in `Daten\`), `app/app.py` (Oberfläche), `app/launcher.pyw` +
+`tools/launcher.c` (Starter).
 
 *Keine Anlageberatung.*

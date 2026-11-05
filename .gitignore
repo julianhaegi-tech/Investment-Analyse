@@ -1,13 +1,10 @@
 __pycache__/
 *.pyc
-.venv/
-venv/
-build/
-dist/
-*.spec.bak
 .pytest_cache/
-# Persoenliche Daten nie committen
+dist/
+Daten/
+*.pdb
+# Persönliche Daten nie committen
 *.pdf
 *.xlsx
 *.db
-data/

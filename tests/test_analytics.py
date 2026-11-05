@@ -1,101 +1,64 @@
-import json
-from pathlib import Path
-
-import pandas as pd
 import pytest
 
-from saxo_analyse.analytics import compute, estimate_trade_from_report, xirr
-from saxo_analyse.app import create_app
-from saxo_analyse.importers.saxo_pdf import parse_saxo_pages
-from saxo_analyse.insights import build_insights
-from saxo_analyse.refresh import refresh_all
+from portfolio.analytics import analyse, xirr
+from portfolio.insights import insights
+from portfolio.market import Market, refresh, saxo_to_yahoo
 
 
-def add(db, d, isin, side, q, p, fees=0.0, name=None):
-    db.upsert_instrument(isin, name or isin, "EUR")
-    db.add_trade({"trade_date": d, "isin": isin, "name": name, "side": side, "quantity": q, "price": p,
-                  "currency": "EUR", "fees_chf": fees, "source": "test"})
+def test_matches_saxo_without_market_data(store):
+    a = analyse(store)
+    k = a["kpi"]
+    assert k["value"] == pytest.approx(31047.02, abs=0.02)
+    assert k["deposits"] == pytest.approx(27622.50)
+    assert k["pnl"] == pytest.approx(3424.52, abs=0.02)
+    assert k["realized"] == pytest.approx(2878.75, abs=0.01)
+    assert k["unrealized"] == pytest.approx(545.77, abs=0.02)
+    assert k["price_effect"] + k["fx_effect"] + k["buy_costs_open"] == pytest.approx(545.77, abs=0.05)
+    assert k["total_costs"] == pytest.approx(456.39)
+    assert not a["has_market"]
+    names = {p["name"]: p for p in a["positions"]}
+    assert names["UBS Gold ETF"]["realized_chf"] == pytest.approx(-91.44)
+    assert not names["Amundi MSCI EM SRI Climate Paris Aligned UCITS ETF"]["open"]
+    assert [s["date"] for s in a["switches"]] == ["2026-01-21", "2026-06-24"]
+    assert -10 < a["twr"].min() * 100 < 0          # keine Ausreisser durch Einzahlungen
+    assert any(t == "Gesamtbild" for _, t, _ in insights(a))
 
 
-def test_xirr_simple():
-    r = xirr([(pd.Timestamp("2025-01-01"), -1000), (pd.Timestamp("2026-01-01"), 1100)])
-    assert r == pytest.approx(0.1, abs=1e-3)
+def test_xirr():
+    import pandas as pd
+    assert xirr([(pd.Timestamp("2025-01-01"), -100), (pd.Timestamp("2026-01-01"), 110)]) == pytest.approx(0.1, abs=1e-3)
 
 
-def test_etf_switch_scenario(db, market):
-    # ETF A kaufen, später verkaufen, Erlös in ETF B umschichten
-    add(db, "2025-10-01", "IE000AAAAAA1", "BUY", 500, 10.0, fees=10, name="ETF A")
-    add(db, "2026-05-04", "IE000AAAAAA1", "SELL", 500, 11.5, fees=10, name="ETF A")
-    add(db, "2026-05-05", "IE000BBBBBB2", "BUY", 300, 20.0, fees=10, name="ETF B")
-    res = refresh_all(db, market)
-    assert res["ok"], res
-    s = compute(db)
-    k = s["kpis"]
-    a = next(p for p in s["positions"] if p["isin"] == "IE000AAAAAA1")
-    b = next(p for p in s["positions"] if p["isin"] == "IE000BBBBBB2")
-    assert not a["open"] and b["open"]
-    # A: Einstand 500*10*0.95+10 = 4760, Erlös 500*11.5*0.95-10 = 5452.5
-    assert a["realized_pnl"] == pytest.approx(5452.5 - 4760, abs=0.01)
-    # B: Wert 300*20*0.95 = 5700, Einstand 5710
-    assert b["market_value"] == pytest.approx(5700)
-    assert b["unrealized_pnl"] == pytest.approx(-10)
-    assert k["pnl"] == pytest.approx(692.5 - 10, abs=0.05)
-    assert k["n_open"] == 1 and k["irr_pct"] is not None
-    # Wechsel A -> B wird aus dem Verkaufserlös bezahlt: nur die Differenz ist neue Einzahlung
-    assert k["net_invested"] == pytest.approx(4760 + (5710 - 5452.5), abs=0.01)
-    assert min(s["series"]["value"]["y"]) > 4000  # kein Einbruch auf 0 zwischen Verkauf und Kauf
-    assert len(s["benchmarks"]) == 2
-    # USD-Benchmark wird in CHF umgerechnet (100 USD * 0.80)
-    acwi = next(x for x in s["benchmarks"] if x["symbol"] == "ACWI")
-    assert acwi["total_pct"] == pytest.approx(0, abs=1e-6)
-    assert s["exposure"]["sector"][0]["name"] == "Technologie"
-    assert s["exposure"]["holding"][0]["value_chf"] == pytest.approx(5700 * 0.05)
-    titles = [i["title"] for i in build_insights(s)]
-    assert "Gesamtbild" in titles and "Frühere ETFs" in titles
+def test_saxo_symbols():
+    assert saxo_to_yahoo("WELA:xetr") == "WELA.DE" and saxo_to_yahoo("AUUSIC:xswx") == "AUUSIC.SW"
 
 
-def test_twr_ignores_deposits(db, market):
-    # Konstanter Kurs: Nachkäufe dürfen keine Rendite erzeugen
-    add(db, "2025-10-01", "IE000BBBBBB2", "BUY", 100, 20.0)
-    add(db, "2026-02-02", "IE000BBBBBB2", "BUY", 200, 20.0)
-    refresh_all(db, market)
-    s = compute(db)
-    assert s["kpis"]["twr_pct"] == pytest.approx(0, abs=1e-6)
-    assert s["kpis"]["pnl"] == pytest.approx(0, abs=1e-6)
+class Fake(Market):
+    def __init__(self):
+        super().__init__()
+
+    def yahoo_search(self, q, cur=None):
+        raise RuntimeError("offline")
+
+    def yahoo_chart(self, s, start):
+        if s == "WELA.DE":
+            return "EUR", [("2026-06-24", 15.2), ("2026-11-04", 15.676), ("2026-11-05", 16.0)]
+        raise RuntimeError("nicht gefunden")
+
+    def justetf_chart(self, isin, cur, start):
+        raise RuntimeError("offline")
+
+    def justetf_profile(self, isin):
+        return {"sector": [("Technologie", 25.0)], "country": [("USA", 60.0)], "holding": [("NVIDIA", 5.0)], "meta": {}}
+
+    def fx(self, b, q, start):
+        return "test", [("2026-06-24", 0.924), ("2026-11-05", 0.9153)]
 
 
-def test_offline_fallback_and_estimate(db):
-    rep = parse_saxo_pages(json.loads(
-        (Path(__file__).parent / "fixtures" / "saxo_report_pages.json").read_text(encoding="utf-8")))
-    db.add_report(rep)
-    h = rep["holdings"][0]
-    est = estimate_trade_from_report(rep, h)
-    assert est["trade_date"] == "2026-06-30" and est["estimated"]
-    db.add_trade(est)
-    s = compute(db)  # ohne Refresh: Kurs aus Bericht
-    assert s["kpis"]["value"] == pytest.approx(31036.42, abs=1)
-    assert s["kpis"]["pnl"] == pytest.approx(619.45, abs=1)
-    assert s["kpis"]["price_effect"] + s["kpis"]["fx_effect"] == pytest.approx(619.45, abs=1)
-    assert any("geschätzt" in w for w in s["warnings"])
-
-
-def test_refresh_falls_back_to_justetf(db):
-    from tests.conftest import FakeMarket
-    add(db, "2025-10-01", "IE000AAAAAA1", "BUY", 10, 10.0)
-    res = refresh_all(db, FakeMarket(fail_yahoo=True))
-    assert any(st["step"].startswith("Kurse") and st["ok"] and "justETF" in st["message"]
-               for st in res["steps"])
-
-
-def test_api_roundtrip(db, market, tmp_path):
-    app = create_app(db)
-    c = app.test_client()
-    r = c.post("/api/trades", json={"trade_date": "2025-10-01", "isin": "ie000bbbbbb2", "side": "Kauf",
-                                    "quantity": "10", "price": "20", "currency": "eur"})
-    assert r.status_code == 200
-    s = c.get("/api/state").get_json()
-    assert s["has_data"] and s["trades"][0]["isin"] == "IE000BBBBBB2"
-    tid = s["trades"][0]["id"]
-    c.put(f"/api/trades/{tid}", json={"quantity": "12"})
-    assert c.get("/api/state").get_json()["trades"][0]["quantity"] == 12
-    assert c.get("/").status_code == 200
+def test_refresh_partial_failure_still_analyses(store):
+    steps = refresh(store, Fake())
+    assert any(s["ok"] and "WELA.DE" in s["msg"] for s in steps)
+    assert any(not s["ok"] for s in steps)      # andere ETFs ohne Ticker -> Hinweis statt Absturz
+    a = analyse(store)
+    assert a["kpi"]["value"] > 31047               # bis 05.11. fortgeschrieben
+    assert a["exposure"]["country"][0]["name"] == "USA"
