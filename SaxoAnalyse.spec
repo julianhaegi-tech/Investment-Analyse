@@ -13,6 +13,6 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, a.binaries, a.datas, [],
     name="SaxoAnalyse",
-    console=True,   # Konsolenfenster zeigt Adresse & Status; schliessen = App beenden
+    console=False,  # kein Konsolenfenster; App läuft im Browser und beendet sich, wenn kein Tab mehr offen ist
     upx=False,
 )

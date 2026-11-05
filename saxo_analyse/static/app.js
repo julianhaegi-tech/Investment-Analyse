@@ -405,3 +405,5 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () 
 
 try { const t = localStorage.getItem("tab"); if (t) document.querySelector(`.tabs [data-tab="${t}"]`)?.click(); } catch (e) { /* egal */ }
 load().catch((e) => toast("Fehler beim Laden: " + e.message));
+// Lebenszeichen: Die App beendet sich, wenn kein Tab mehr offen ist.
+setInterval(() => fetch("/api/ping").catch(() => {}), 20000);

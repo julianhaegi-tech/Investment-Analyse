@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
+import time
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -20,11 +22,34 @@ from .refresh import refresh_all
 STATIC = Path(__file__).parent / "static"
 
 
-def create_app(db: Database | None = None) -> Flask:
+log = logging.getLogger("saxo_analyse")
+APP_ID = "saxo-portfolio-analyse"
+IDLE_TIMEOUT_S = 180  # ohne offenen Browser-Tab beendet sich die App nach 3 Minuten
+
+
+def create_app(db: Database | None = None, idle_shutdown: bool = False) -> Flask:
     app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = 30 * 1024 * 1024
     app.db = db or Database()
     lock = threading.Lock()
+    last_seen = {"t": time.time()}
+
+    @app.before_request
+    def _touch():
+        last_seen["t"] = time.time()
+
+    @app.get("/api/ping")
+    def ping():
+        return jsonify({"app": APP_ID, "version": __version__})
+
+    if idle_shutdown:
+        def _watchdog():
+            while True:
+                time.sleep(15)
+                if time.time() - last_seen["t"] > IDLE_TIMEOUT_S:
+                    log.info("Kein Browser-Tab mehr offen – App wird beendet.")
+                    os._exit(0)
+        threading.Thread(target=_watchdog, daemon=True).start()
 
     @app.get("/")
     def index():
@@ -46,7 +71,10 @@ def create_app(db: Database | None = None) -> Flask:
     @app.post("/api/refresh")
     def refresh():
         with lock:
-            return jsonify(refresh_all(app.db))
+            res = refresh_all(app.db)
+        for st in res["steps"]:
+            (log.info if st["ok"] else log.warning)("Refresh %s: %s", st["step"], st["message"])
+        return jsonify(res)
 
     @app.post("/api/import")
     def import_file():
@@ -63,6 +91,7 @@ def create_app(db: Database | None = None) -> Flask:
                     return jsonify(_import_ledger(app.db, content))
                 return jsonify(_import_trades(app.db, content, name))
         except Exception as e:  # noqa: BLE001
+            log.exception("Import fehlgeschlagen: %s", name)
             return jsonify({"error": str(e)}), 400
 
     @app.post("/api/trades")
